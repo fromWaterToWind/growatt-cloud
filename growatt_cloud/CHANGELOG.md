@@ -4,14 +4,15 @@ Alle bemerkenswerten Änderungen an **Growatt Cloud**.
 
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- MQTT-Discovery-Sturm beim App-Start (hunderte Topic-Löschungen) – HA kann dabei wegkippen. Discovery bleibt stehen, Legacy-Purge nur noch einmal.
+
 ## [0.1.33] – 2026-09-30
 
 ### Changed
 - Config speichern ohne stale_after_hours (ältere Installationen).
-## [Unreleased]
-
-### Fixed
-- App-Config speichern: `stale_after_hours` / `skip_serials` fehlen in älteren Installationen – Schema optional, Default 24 h.
 
 ## [0.1.32] – 2026-09-30
 

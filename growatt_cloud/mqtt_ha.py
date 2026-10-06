@@ -10,9 +10,6 @@ import threading
 import time
 from typing import Any
 
-from discovery_purge import STALE_DISCOVERY_KEYS
-from sensors import PROTECTED_DISCOVERY_KEYS
-
 LOG = logging.getLogger("growatt-cloud.mqtt")
 
 # object_id → (name, unit|None, device_class|None, state_class|None, component)
@@ -303,8 +300,8 @@ class HaMqtt:
         self._discovery_sig: dict[str, str] = {}
         self._discovery_keys: dict[str, set[str]] = {}
         self._wanted_by_node: dict[str, set[str]] = {}
-        self._subscribed_nodes: set[str] = set()
         self._stale_purged: set[str] = set()
+        self._towers_purged: set[str] = set()
         self._plant_purged = False
         self._connected = threading.Event()
         self._keys_path = "/data/growatt_discovery_keys.json"
@@ -316,15 +313,36 @@ class HaMqtt:
                 return
             with open(self._keys_path, encoding="utf-8") as fh:
                 raw = json.load(fh)
-            if isinstance(raw, dict):
-                self._discovery_keys = {k: set(v) for k, v in raw.items() if isinstance(v, list)}
+            if not isinstance(raw, dict):
+                return
+            if isinstance(raw.get("keys"), dict):
+                self._discovery_keys = {
+                    k: set(v) for k, v in raw["keys"].items() if isinstance(v, list)
+                }
+                sig = raw.get("sig") if isinstance(raw.get("sig"), dict) else {}
+                self._discovery_sig = {k: str(v) for k, v in sig.items()}
+                self._stale_purged = set(raw.get("stale_purged") or [])
+                self._towers_purged = set(raw.get("towers_purged") or [])
+                self._plant_purged = bool(raw.get("plant_purged"))
+                return
+            self._discovery_keys = {k: set(v) for k, v in raw.items() if isinstance(v, list)}
+            self._stale_purged = set(self._discovery_keys)
+            self._towers_purged = set(self._discovery_keys)
+            for sn in self._discovery_keys:
+                self._discovery_sig[sn] = f"{DISCOVERY_SIG_VERSION}|{self.sensor_mode}|{slug(sn)}"
         except Exception:
             self._discovery_keys = {}
 
     def _save_discovery_keys(self) -> None:
         try:
             os.makedirs(os.path.dirname(self._keys_path), exist_ok=True)
-            payload = {k: sorted(v) for k, v in self._discovery_keys.items()}
+            payload = {
+                "keys": {k: sorted(v) for k, v in self._discovery_keys.items()},
+                "sig": dict(self._discovery_sig),
+                "stale_purged": sorted(self._stale_purged),
+                "towers_purged": sorted(self._towers_purged),
+                "plant_purged": self._plant_purged,
+            }
             with open(self._keys_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)
         except Exception as exc:
@@ -350,11 +368,6 @@ class HaMqtt:
         def on_connect(c, _u, _f, rc, *_a):
             if rc == 0:
                 LOG.info("MQTT verbunden (%s:%s)", self.host, self.port)
-                self._discovery_sig.clear()
-                self._load_discovery_keys()
-                self._subscribed_nodes.clear()
-                self._stale_purged.clear()
-                self._plant_purged = False
                 c.publish(f"{self.state_prefix}/status", "online", retain=True)
                 self._connected.set()
             else:
@@ -366,24 +379,8 @@ class HaMqtt:
             if rc != 0:
                 LOG.warning("MQTT getrennt (rc=%s) – reconnect läuft", rc)
 
-        def on_message(_c, _u, msg):
-            parts = msg.topic.split("/")
-            if len(parts) < 5 or parts[-1] != "config":
-                return
-            component, node, disc_oid = parts[-4], parts[-3], parts[-2]
-            if component not in ("sensor", "binary_sensor"):
-                return
-            wanted = self._wanted_by_node.get(node)
-            # Discovery-Topic nutzt gc_<key>; wanted enthält die Roh-Keys
-            key = disc_oid[3:] if disc_oid.startswith("gc_") else disc_oid
-            if wanted is None or key in wanted or disc_oid in wanted or not msg.payload:
-                return
-            LOG.info("Entferne veraltete Discovery: %s", msg.topic)
-            self._pub(msg.topic, "", retain=True)
-
         client.on_connect = on_connect
         client.on_disconnect = on_disconnect
-        client.on_message = on_message
         LOG.info("MQTT verbindet zu %s:%s …", self.host, self.port)
         client.connect(self.host, self.port, keepalive=60)
         client.loop_start()
@@ -439,15 +436,6 @@ class HaMqtt:
     def _clear_discovery(self, node: str, object_id: str) -> None:
         self._clear_discovery_config(node, object_id)
         self._pub(f"{self.state_prefix}/{node}/{object_id}", "", retain=True)
-
-    def _subscribe_purge(self, node: str) -> None:
-        if not self._client or node in self._subscribed_nodes:
-            return
-        for component in ("sensor", "binary_sensor"):
-            topic = f"{self.discovery_prefix}/{component}/{node}/+/config"
-            self._client.subscribe(topic, qos=0)
-            LOG.info("MQTT Purge-Subscribe %s", topic)
-        self._subscribed_nodes.add(node)
 
     def _resolve_device_name(self, label: str, serial: str, values: dict[str, Any]) -> str:
         label_clean = (label or "Growatt").strip()
@@ -520,20 +508,11 @@ class HaMqtt:
         node = slug(serial)
         new_keys = set(keys)
         self._wanted_by_node[node] = new_keys
-        self._subscribe_purge(node)
 
         old_keys = self._discovery_keys.get(serial) or set()
         removed = old_keys - new_keys
         added = new_keys - old_keys
         mode_changed = self._discovery_sig.get(serial) != sig
-
-        if serial not in self._stale_purged:
-            stale_once = set(STALE_DISCOVERY_KEYS) - new_keys - set(PROTECTED_DISCOVERY_KEYS)
-            for gone in sorted(stale_once):
-                self._clear_discovery(node, gone)
-            if stale_once:
-                LOG.info("HA-Discovery-Purge %s → %s Alt-Entities entfernt", serial, len(stale_once))
-            self._stale_purged.add(serial)
 
         if removed:
             for gone in sorted(removed):
@@ -541,8 +520,9 @@ class HaMqtt:
             LOG.info("HA-Discovery-Purge %s → %s Entities entfernt", serial, len(removed))
 
         if not mode_changed and not added:
-            self._discovery_keys[serial] = new_keys
-            self._save_discovery_keys()
+            if self._discovery_keys.get(serial) != new_keys:
+                self._discovery_keys[serial] = new_keys
+                self._save_discovery_keys()
             self._purge_fake_tower_devices(serial)
             self._purge_plant_device()
             return
@@ -647,6 +627,8 @@ class HaMqtt:
 
     def _purge_fake_tower_devices(self, serial: str) -> None:
         """Einmalig: virtuelle Noah Speicher 2/Tower-Geräte aus MQTT Discovery entfernen."""
+        if serial in self._towers_purged:
+            return
         for tower in range(2, 5):
             node = f"{slug(serial)}_t{tower}"
             key = f"{serial}#t{tower}"
@@ -658,6 +640,7 @@ class HaMqtt:
                 self._discovery_sig.pop(key, None)
                 self._wanted_by_node.pop(node, None)
                 LOG.info("Fake-Gerät entfernt: %s (Noah Speicher/Tower %s)", node, tower)
+        self._towers_purged.add(serial)
         self._save_discovery_keys()
 
     def publish_states(self, serial: str, values: dict[str, Any]) -> None:
