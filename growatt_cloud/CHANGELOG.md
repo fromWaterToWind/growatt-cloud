@@ -4,6 +4,10 @@ Alle bemerkenswerten Änderungen an **Growatt Cloud**.
 
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.34] – 2026-10-06
+
+### Changed
+- MQTT-Discovery nicht mehr bei jedem Start neu aufbauen (HA-Crash).
 ## [Unreleased]
 
 ### Fixed
