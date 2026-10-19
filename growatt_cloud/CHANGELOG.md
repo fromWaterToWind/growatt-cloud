@@ -4,6 +4,10 @@ Alle bemerkenswerten Änderungen an **Growatt Cloud**.
 
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.35] – 2026-10-19
+
+### Changed
+- Nexa/Noah nach Abend-Shutdown nicht mehr als veraltet behandeln; morgens wieder normales Polling.
 ## [0.1.34] – 2026-10-06
 
 ### Changed
