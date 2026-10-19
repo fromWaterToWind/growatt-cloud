@@ -1031,9 +1031,10 @@ def is_reading_stale(
     tz_name: str | None = None,
     max_age_hours: float = 24.0,
 ) -> bool:
-    """True if Growatt last_update is older than max_age_hours, or device is lost."""
-    if str(values.get("connectivity") or "").upper() == "OFF":
-        return True
+    """True if Growatt last_update is older than max_age_hours.
+
+    Nightly shutdown sets connectivity=OFF with a fresh last_update — that is not stale.
+    """
     raw = values.get("last_update")
     if raw in (None, ""):
         return False

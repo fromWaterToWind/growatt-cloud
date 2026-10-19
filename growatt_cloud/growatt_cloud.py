@@ -35,6 +35,7 @@ LOG = logging.getLogger("growatt-cloud")
 STORAGE_TYPES = {"noah", "nexa"}
 INVERTER_TYPES = {"min", "inv", "tlx"}
 INFO_INTERVAL_S = 300  # queryDeviceInfo / WiFi – offizielles Details-Limit
+STALE_POLL_S = 3600  # unused device: hourly, independent of poll_devices_seconds
 
 
 def setup_logging(level_name: str = "info") -> None:
@@ -264,7 +265,7 @@ class Bridge:
 
     def _poll_interval(self, sn: str, live_s: int) -> int:
         if self._stale_known.get(sn):
-            return max(live_s, self.poll_devices_s)
+            return max(live_s, STALE_POLL_S)
         return live_s
 
     def _mark_stale(self, sn: str, values: dict[str, Any], reason: str) -> None:

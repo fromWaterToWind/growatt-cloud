@@ -12,6 +12,7 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - MQTT-Discovery-Sturm beim App-Start (hunderte Topic-Löschungen) – HA kann dabei wegkippen. Discovery bleibt stehen, Legacy-Purge nur noch einmal.
+- Nexa/Noah nach Abend-Shutdown nicht mehr als veraltet behandeln (`lost` ≠ 24h-Pause); morgens wieder im normalen Intervall.
 
 ## [0.1.33] – 2026-09-30
 

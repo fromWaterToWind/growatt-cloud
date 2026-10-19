@@ -96,8 +96,20 @@ class StaleTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         self.assertFalse(is_reading_stale({"last_update": now}, tz_name="UTC", max_age_hours=24))
 
-    def test_lost_is_stale(self):
-        self.assertTrue(is_reading_stale({"connectivity": "OFF"}, tz_name="UTC", max_age_hours=24))
+    def test_lost_overnight_is_not_stale(self):
+        from datetime import datetime, timedelta, timezone
+
+        twelve_h = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+        self.assertFalse(
+            is_reading_stale(
+                {"connectivity": "OFF", "last_update": twelve_h},
+                tz_name="UTC",
+                max_age_hours=24,
+            )
+        )
+
+    def test_lost_without_timestamp_is_not_stale(self):
+        self.assertFalse(is_reading_stale({"connectivity": "OFF"}, tz_name="UTC", max_age_hours=24))
 
 
 class NoSerialLeakTests(unittest.TestCase):
